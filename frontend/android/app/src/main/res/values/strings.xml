@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TeamTalk</string>
+    <string name="title_activity_main">TeamTalk</string>
+    <string name="package_name">com.teamtalk.app</string>
+    <string name="custom_url_scheme">com.teamtalk.app</string>
+</resources>

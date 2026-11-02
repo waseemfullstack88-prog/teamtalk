@@ -1,0 +1,32 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- TeamTalk Modern Monogram & Shield Chat Icon -->
+    <!-- Circular / Rounded Shield Base Glow -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M54,26 C38.54,26 26,38.54 26,54 C26,60.85 28.45,67.14 32.55,72.03 L28.5,82 L38.82,78.23 C43.27,80.62 48.45,82 54,82 C69.46,82 82,69.46 82,54 C82,38.54 69.46,26 54,26 Z" />
+    
+    <!-- Inner Dark Core for Contrast -->
+    <path
+        android:fillColor="#0B141A"
+        android:pathData="M54,30 C40.75,30 30,40.75 30,54 C30,59.95 32.17,65.41 35.79,69.61 L32.5,77.5 L40.66,74.52 C44.57,76.71 49.12,78 54,78 C67.25,78 78,67.25 78,54 C78,40.75 67.25,30 54,30 Z" />
+
+    <!-- Security Shield in Center -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M54,38 L65,42.5 L65,52.5 C65,60 60.5,66 54,69 C47.5,66 43,60 43,52.5 L43,42.5 Z" />
+
+    <!-- Inner Shield Detail (Two-tone) -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M54,41 L62,44.5 L62,52.5 C62,58.2 58.5,63 54,65.8 Z" />
+
+    <!-- Center Lock Symbol -->
+    <path
+        android:fillColor="#0B141A"
+        android:pathData="M54,48 C51.79,48 50,49.79 50,52 L50,54 L49,54 C48.45,54 48,54.45 48,55 L48,61 C48,61.55 48.45,62 49,62 L59,62 C59.55,62 60,61.55 60,61 L60,55 C60,54.45 59.55,54 59,54 L58,54 L58,52 C58,49.79 56.21,48 54,48 Z M54,49.5 C55.38,49.5 56.5,50.62 56.5,52 L56.5,54 L51.5,54 L51.5,52 C51.5,50.62 52.62,49.5 54,49.5 Z" />
+</vector>
+

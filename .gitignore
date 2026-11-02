@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+dist/
+build/
+**/dist/
+**/build/
+backend/.pgdata/
+backend/.env
+backend/test_out.txt
+frontend/tsconfig.tsbuildinfo
+frontend/android/.gradle/
+frontend/android/.idea/
+frontend/android/app/build/
+frontend/android/local.properties
+*.apk
+.env
+.DS_Store

@@ -1,0 +1,520 @@
+// TeamTalk database schema (PostgreSQL + Prisma)
+// Message bodies are encrypted at rest by the application layer (AES-256-GCM, see src/lib/atrest.ts).
+// This is server-side encryption, NOT end-to-end encryption.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  MEMBER
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION // registered, e-mail not yet verified
+  PENDING_APPROVAL // e-mail verified, waiting for an admin (when approval is required)
+  ACTIVE
+  DEACTIVATED
+}
+
+enum Visibility {
+  EVERYONE
+  CHAT_PARTNERS
+  NOBODY
+}
+
+enum ChatType {
+  DIRECT
+  GROUP
+  CHANNEL // announcement channel: only admins post
+}
+
+enum ChatMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum MessageType {
+  TEXT
+  STICKER
+  GIF
+  IMAGE
+  VIDEO
+  AUDIO
+  VOICE
+  FILE
+  POLL
+  SYSTEM
+}
+
+enum ReceiptState {
+  DELIVERED
+  READ
+}
+
+enum TokenType {
+  VERIFY_EMAIL
+  PASSWORD_RESET
+  REGISTER_OTP
+  LOGIN_OTP
+  LINK_BROWSER
+}
+
+enum CallKind {
+  AUDIO
+  VIDEO
+}
+
+enum CallStatus {
+  RINGING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  MISSED
+  ENDED
+  FAILED
+}
+
+enum StatusKind {
+  TEXT
+  IMAGE
+  VIDEO
+}
+
+enum ScanStatus {
+  PENDING
+  CLEAN
+  INFECTED
+  SKIPPED // no scanner configured
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+  chats     Chat[]
+  invites   Invite[]
+  settings  Json     @default("{}")
+}
+
+model User {
+  id              String     @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id])
+  email           String     @unique
+  username        String?    @unique
+  displayName     String
+  about           String     @default("")
+  avatarFileId    String?
+  avatarUrl       String?
+  passwordHash    String
+  role            Role       @default(MEMBER)
+  status          UserStatus @default(PENDING_VERIFICATION)
+  emailVerifiedAt DateTime?
+  lastSeenAt      DateTime?
+
+  // brute-force protection
+  failedLogins   Int       @default(0)
+  lockedUntil    DateTime?
+  lastFailedAt   DateTime?
+
+  // two-factor (TOTP). Secret is encrypted at rest.
+  totpSecretEnc   String?
+  totpEnabledAt   DateTime?
+  recoveryCodes   RecoveryCode[]
+
+  // privacy controls
+  privacyProfilePhoto Visibility @default(EVERYONE)
+  privacyLastSeen     Visibility @default(CHAT_PARTNERS)
+  privacyOnline       Visibility @default(CHAT_PARTNERS)
+  privacyStatus       Visibility @default(CHAT_PARTNERS)
+  privacyGroups       Visibility @default(EVERYONE) // who may add me to groups
+  readReceipts        Boolean    @default(true)
+  autoDownloadWifi    Boolean    @default(true)
+  autoDownloadMobile  Boolean    @default(false)
+  primaryDeviceId     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions       Session[]
+  passkeys       Passkey[]
+  tokens         AuthToken[]
+  memberships    ChatMember[]
+  messages       Message[]        @relation("MessageSender")
+  invitesCreated Invite[]         @relation("InviteCreator")
+  statusUpdates  StatusUpdate[]
+  pushTokens     PushToken[]
+  blocksMade     Block[]          @relation("Blocker")
+  blocksReceived Block[]          @relation("Blocked")
+  reportsMade    Report[]         @relation("Reporter")
+  callsMade      Call[]           @relation("Caller")
+  callParts      CallParticipant[]
+
+  @@index([workspaceId, status])
+}
+
+model Invite {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  email       String
+  role        Role      @default(MEMBER)
+  tokenHash   String    @unique
+  createdById String
+  createdBy   User      @relation("InviteCreator", fields: [createdById], references: [id])
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+}
+
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      TokenType
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime? // single-use
+  createdAt DateTime  @default(now())
+
+  @@index([userId, type])
+}
+
+model RecoveryCode {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash String
+  usedAt   DateTime?
+
+  @@index([userId])
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
+  prevRefreshHash  String? // used to detect refresh-token reuse
+  deviceId         String // client generated stable id (per install)
+  deviceName       String
+  userAgent        String    @default("")
+  ip               String    @default("")
+  mfaVerified      Boolean   @default(false)
+  isCompanion      Boolean   @default(false)
+  linkToken        String?
+  createdAt        DateTime  @default(now())
+  lastActiveAt     DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+
+  @@index([userId, revokedAt])
+  @@index([userId, deviceId])
+}
+
+model Passkey {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credentialId String   @unique
+  publicKey    Bytes
+  counter      BigInt   @default(0)
+  transports   String[]
+  label        String   @default("Passkey")
+  createdAt    DateTime @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([userId])
+}
+
+model PasskeyChallenge {
+  id        String   @id @default(cuid())
+  userId    String?
+  challenge String
+  expiresAt DateTime
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  ip         String   @default("")
+  userAgent  String   @default("")
+  suspicious Boolean  @default(false)
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model Chat {
+  id                  String     @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace  @relation(fields: [workspaceId], references: [id])
+  type                ChatType
+  name                String?
+  description         String     @default("")
+  avatarFileId        String?
+  directKey           String?    @unique // sorted "userA:userB" for DIRECT chats
+  createdById         String?
+  disappearingSeconds Int? // null = off
+  isProtected         Boolean    @default(false)
+  isDefault           Boolean    @default(false) // new users are auto-added (e.g. #General)
+  membersCanInvite    Boolean    @default(false)
+  archivedForAll      Boolean    @default(false)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @default(now())
+
+  members  ChatMember[]
+  messages Message[]
+
+  @@index([workspaceId, type])
+}
+
+model ChatMember {
+  chatId       String
+  chat         Chat           @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         ChatMemberRole @default(MEMBER)
+  mutedUntil   DateTime?
+  pinned       Boolean        @default(false)
+  archived     Boolean        @default(false)
+  hidden       Boolean        @default(false) // "delete chat" for myself
+  clearedAt    DateTime? // messages before this are hidden for me
+  lastReadAt   DateTime?
+  lastReadMessageId String?
+  joinedAt     DateTime       @default(now())
+
+  @@id([chatId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id            String      @id @default(cuid())
+  chatId        String
+  chat          Chat        @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  senderId      String
+  sender        User        @relation("MessageSender", fields: [senderId], references: [id])
+  clientId      String? // idempotency key for the offline queue
+  type          MessageType @default(TEXT)
+  bodyEnc       String? // AES-256-GCM encrypted text body
+  meta          Json        @default("{}") // sticker id, gif url, voice peaks/duration, mentions, link preview
+  replyToId     String?
+  replyTo       Message?    @relation("Replies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies       Message[]   @relation("Replies")
+  forwardedFromUserId String?
+  forwarded     Boolean     @default(false)
+  editedAt      DateTime?
+  deletedForAllAt DateTime?
+  pinnedAt      DateTime?
+  pinnedById    String?
+  expiresAt     DateTime?
+  createdAt     DateTime    @default(now())
+
+  attachments Attachment[]
+  receipts    Receipt[]
+  reactions   Reaction[]
+  stars       Star[]
+  deletions   MessageDeletion[]
+  poll        Poll?
+
+  @@unique([senderId, clientId])
+  @@index([chatId, createdAt])
+  @@index([expiresAt])
+}
+
+model Receipt {
+  messageId String
+  message   Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  state     ReceiptState
+  at        DateTime     @default(now())
+
+  @@id([messageId, userId])
+}
+
+model Reaction {
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@id([messageId, userId])
+}
+
+model Star {
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@id([messageId, userId])
+}
+
+model MessageDeletion {
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@id([messageId, userId])
+}
+
+model Attachment {
+  id           String     @id @default(cuid())
+  uploaderId   String
+  messageId    String?
+  message      Message?   @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  statusId     String? // attached to a status update
+  purpose      String     @default("MESSAGE") // MESSAGE | AVATAR | STATUS
+  storageKey   String
+  originalName String // sanitized display name
+  mime         String
+  size         Int
+  sha256       String
+  scanStatus   ScanStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  @@index([messageId])
+  @@index([uploaderId])
+}
+
+model Poll {
+  id        String       @id @default(cuid())
+  messageId String       @unique
+  message   Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  question  String
+  multiple  Boolean      @default(false)
+  closedAt  DateTime?
+  options   PollOption[]
+}
+
+model PollOption {
+  id     String     @id @default(cuid())
+  pollId String
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  text   String
+  pos    Int
+  votes  PollVote[]
+}
+
+model PollVote {
+  optionId String
+  option   PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  userId   String
+  at       DateTime   @default(now())
+
+  @@id([optionId, userId])
+}
+
+model StatusUpdate {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        StatusKind
+  body        String      @default("")
+  background  String      @default("")
+  visibility  Visibility  @default(CHAT_PARTNERS)
+  expiresAt   DateTime
+  createdAt   DateTime    @default(now())
+  views       StatusView[]
+
+  @@index([expiresAt])
+  @@index([userId, createdAt])
+}
+
+model StatusView {
+  statusId String
+  status   StatusUpdate @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  userId   String
+  at       DateTime     @default(now())
+
+  @@id([statusId, userId])
+}
+
+model Call {
+  id         String            @id @default(cuid())
+  callerId   String
+  caller     User              @relation("Caller", fields: [callerId], references: [id])
+  chatId     String?
+  kind       CallKind
+  status     CallStatus        @default(RINGING)
+  createdAt  DateTime          @default(now())
+  answeredAt DateTime?
+  endedAt    DateTime?
+  durationSec Int              @default(0)
+  // Group calls (future phase): one Call, many participants, media via an SFU.
+  isGroup    Boolean           @default(false)
+  participants CallParticipant[]
+
+  @@index([callerId, createdAt])
+}
+
+model CallParticipant {
+  callId   String
+  call     Call      @relation(fields: [callId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime?
+  leftAt   DateTime?
+  seen     Boolean   @default(false)
+
+  @@id([callId, userId])
+  @@index([userId])
+}
+
+model Block {
+  blockerId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([blockerId, blockedId])
+}
+
+model Report {
+  id           String    @id @default(cuid())
+  reporterId   String
+  reporter     User      @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUserId String?
+  messageId    String?
+  chatId       String?
+  reason       String
+  details      String    @default("")
+  resolvedAt   DateTime?
+  resolvedById String?
+  createdAt    DateTime  @default(now())
+
+  @@index([resolvedAt])
+}
+
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database with UTF-8 encoding
+  postgres:
+    image: postgres:16-alpine
+    container_name: teamtalk_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: teamtalk
+      POSTGRES_PASSWORD: teamtalk_secret_pass
+      POSTGRES_DB: teamtalk
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teamtalk -d teamtalk"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+
+  # Redis for Realtime presence and rate-limiting
+  redis:
+    image: redis:7-alpine
+    container_name: teamtalk_redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+
+  # MinIO S3-compatible private object storage
+  minio:
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
+    container_name: teamtalk_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin_secret_key
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  # coturn TURN/STUN server for WebRTC relay
+  coturn:
+    image: coturn/coturn:latest
+    container_name: teamtalk_coturn
+    restart: unless-stopped
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
+      - "5349:5349/udp"
+    volumes:
+      - ./infra/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+
+  # TeamTalk Node.js Backend API & Socket Server
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: teamtalk_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      coturn:
+        condition: service_started
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://teamtalk:teamtalk_secret_pass@postgres:5432/teamtalk?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "super_secret_jwt_key_at_least_32_chars_long_teamtalk"
+      AT_REST_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      TURN_SECRET: "teamtalk_turn_secret_change_in_production_9f81a7b"
+      TURN_REALM: "teamtalk.internal"
+      STORAGE_DRIVER: "local"
+      STORAGE_LOCAL_DIR: "./uploads"
+      ALLOWED_ORIGINS: "http://localhost,http://localhost:80,http://127.0.0.1"
+    ports:
+      - "3000:3000"
+
+  # Frontend Nginx SPA Web App
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: teamtalk_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
